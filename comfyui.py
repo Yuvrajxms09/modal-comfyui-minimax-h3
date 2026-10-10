@@ -484,8 +484,8 @@ def wait_for_port(port: int, timeout: int = 60):
                 return  # port is open — ComfyUI is ready
         except OSError:
             time.sleep(0.5)
-    print(f"WARNING: ComfyUI never became ready on port {port}")
-    #raise TimeoutError(f"ComfyUI never became ready on port {port}")
+    print(f"WARNING: ComfyUI didn't became ready on port {port} after {timeout} seconds!")
+    #raise TimeoutError(f"ComfyUI didn't became ready on port {port} after {timeout} seconds!")
 
 
 with image.imports():
@@ -1560,7 +1560,7 @@ class ComfyGPU:
         print("App Restored!")
 
     # Note: Sometimes ComfyUI process no longer exist after restored from Snapshot (even though it still existed during restoration), thus web_server got timedout or connectionRefused error, wasting MAXSTARTTIME of GPU cost
-    @modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME)
+    '''@modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME)
     def ui(self):
         proc = getattr(self, "proc", None)
         if proc is not None:
@@ -1588,8 +1588,8 @@ class ComfyGPU:
                     raise RuntimeError("ComfyUI no longer running! Restoration might be failed?")
         else:
             print(f"ComfyUI process not found.") 
-        print("App Ready!")
-    '''@modal.asgi_app()
+        print("App Ready!")'''
+    @modal.asgi_app()
     def ui(self):
         proc = getattr(self, "proc", None)
         if proc is not None:
@@ -1758,7 +1758,7 @@ class ComfyGPU:
                     await websocket.close()
             
         print("App Ready!")
-        return app'''
+        return app
 
     @modal.method()
     def vol_commit(self):
