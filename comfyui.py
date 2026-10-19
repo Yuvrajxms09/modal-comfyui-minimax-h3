@@ -90,12 +90,12 @@ image = (
 def detect_comfyui_path() -> Path:
     global COMFYUI_ROOT
     global COMFY_MODELS_ROOT
-    comfyui_path = COMFYUI_ROOT
 
     # Prevent detecting local ComfyUI path, which might have backslash issue on Windows
     if modal.is_local():
         return COMFYUI_ROOT
-        
+
+    comfyui_path = COMFYUI_ROOT
     try:
         result = subprocess.check_output(["comfy", "which"], text=True)
         if ":" in result:
