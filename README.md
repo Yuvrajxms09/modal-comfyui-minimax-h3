@@ -36,7 +36,7 @@ Good for testing Wan2.2/LTX-2.5/MiniMax-H3 or other image/video/audio generation
      ```
      .\.venv\Scripts\Activate.ps1 
      ```
-     Note: If PowerShell shows a script execution error, you might need to run this first:
+     _**Note:** If PowerShell shows a script execution error, you might need to run this first:_
      ```
      Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser 
      ```
