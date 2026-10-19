@@ -24,6 +24,10 @@ Good for testing Wan2.2/LTX-2.5/MiniMax-H3 or other image/video/audio generation
    ```bash
    uv sync
    ```
+   2.1. Activate the virtual environment (if you're not already use a venv):
+     ```
+     source .venv/bin/activate
+     ```
 3. Set up your modal account (if not done already):
    ```bash
    modal setup
