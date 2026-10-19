@@ -28,7 +28,19 @@ Good for testing Wan2.2/LTX-2.5/MiniMax-H3 or other image/video/audio generation
      ```
      source .venv/bin/activate
      ```
-3. Set up your modal account (if not done already):
+     Or on Windows (CMD):
+     ```
+     \.venv\Scripts\activate.bat 
+     ```
+     Or PowerShell:
+     ```
+     .\.venv\Scripts\Activate.ps1 
+     ```
+     Note: If PowerShell shows a script execution error, you might need to run this first:
+     ```
+     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser 
+     ```
+4. Set up your modal account (if not done already):
    ```bash
    modal setup
    ```
