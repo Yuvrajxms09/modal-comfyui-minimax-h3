@@ -12,6 +12,7 @@ import modal
 GPU_MODEL = os.getenv("MODAL_GPU", "L4")
 GPU_NAME = GPU_MODEL.split(':')[0]
 GPU_COUNT = int(GPU_MODEL.split(":")[1]) if ":" in GPU_MODEL else 1
+USE_AUTH = os.getenv("MODAL_USE_AUTH", "False").lower() in ("true", "1", "yes", "on") # App endpoint can only be accessed with Proxy token
 MAXTIME = int(os.getenv("MODAL_MAXTIME", "3600")) # stream & websocket max lifetime before forcefully terminated, will also affects startup time when lower than MAXSTARTTIME.
 IDLETIME = int(os.getenv("MODAL_IDLETIME", "60")) # spin down on idle timeout
 WAITTIME = int(os.getenv("MODAL_WAITTIME", "20")) # wait time to finished progressbar animation when inference is done (ie. VHS save video node)
@@ -25,6 +26,7 @@ def update_vars_from_env():
     global GPU_MODEL
     global GPU_NAME
     global GPU_COUNT
+    global USE_AUTH
     global MAXTIME
     global IDLETIME
     global WAITTIME
@@ -37,6 +39,7 @@ def update_vars_from_env():
     GPU_MODEL = os.getenv("MODAL_GPU", "L4")
     GPU_NAME = GPU_MODEL.split(':')[0]
     GPU_COUNT = int(GPU_MODEL.split(":")[1]) if ":" in GPU_MODEL else 1
+    USE_AUTH = os.getenv("MODAL_USE_AUTH", "False").lower() in ("true", "1", "yes", "on")
     MAXTIME = int(os.getenv("MODAL_MAXTIME", "3600"))
     IDLETIME = int(os.getenv("MODAL_IDLETIME", "60"))
     WAITTIME = int(os.getenv("MODAL_WAITTIME", "20"))
@@ -1560,7 +1563,7 @@ class ComfyGPU:
         print("App Restored!")
 
     # Note: Sometimes ComfyUI process no longer exist after restored from Snapshot (even though it still existed during restoration), thus web_server got timedout or connectionRefused error, wasting MAXSTARTTIME of GPU cost
-    '''@modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME)
+    '''@modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME, requires_proxy_auth=USE_AUTH)
     def ui(self):
         proc = getattr(self, "proc", None)
         if proc is not None:
@@ -1589,7 +1592,7 @@ class ComfyGPU:
         else:
             print(f"ComfyUI process not found.") 
         print("App Ready!")'''
-    @modal.asgi_app()
+    @modal.asgi_app(requires_proxy_auth=USE_AUTH)
     def ui(self):
         proc = getattr(self, "proc", None)
         if proc is not None:
@@ -1832,7 +1835,7 @@ class ComfyMix:
         #)
         wait_for_port(uiport, timeout=30)
     
-    @modal.asgi_app()
+    @modal.asgi_app(requires_proxy_auth=USE_AUTH)
     def ui(self):
         print("App Ready!")
         return web_app
@@ -1897,7 +1900,7 @@ class ComfyCPU:
         #)
         wait_for_port(uiport, timeout=30)
     
-    @modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME)
+    @modal.web_server(port=uiport, startup_timeout=MAXSTARTTIME, requires_proxy_auth=USE_AUTH)
     def ui(self):
         print("App Ready!")
     
