@@ -98,8 +98,10 @@ MODAL_MAXTIME=3600
 MODAL_IDLETIME=38
 MODAL_WAITTIME=20
 MODAL_MAXSTARTTIME=300
+MODAL_USE_AUTH=True
 ```
-You can access ComfyUI from the provided persistent URL when successfully deployed.
+You can access ComfyUI from the provided persistent URL when successfully deployed.  
+You will need to create a Modal's Proxy Token (from Settings) when using `MODAL_USE_AUTH`.
 
 ## Features
 
