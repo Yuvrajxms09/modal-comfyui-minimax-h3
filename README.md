@@ -72,7 +72,8 @@ Open ComfyUI manager on comfyui and click "Used in Workflow" to see which custom
 _**Note:** You can enable Legacy ComfyUI Manager by using `--enable-manager-legacy-ui` argument._
 
 - Add these custom nodes to `comfy_plugins` in `plugins.py`(be careful of node id). You can find the node id at https://registry.comfy.org/
-- You can also install custom nodes repository using `git` url. Add the url, branch, and their dependencies to `comfy_plugins_ext` in `plugins.py` (be careful of dependency conflicts).
+- You can also install custom nodes repository using `git` url. Add the url, branch, and their dependencies to `comfy_plugins_ext` in `plugins.py` (be careful of dependency conflicts).  
+_**Note:** We are installing `requirements.txt` with`--no-deps` option (similar to what ComfyUI-Manager did), so there might be some missing packages that need to be added to `ext_deps`. Check the log console for missing modules._ 
 
 ## Usage
 
