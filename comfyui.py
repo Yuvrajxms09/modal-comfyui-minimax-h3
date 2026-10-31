@@ -270,6 +270,7 @@ def download_all(profile_selection=None):
         download_external_model(model["url"], model["filename"], model["model_dir"])
 
     download_workflow_assets(profile_selection)
+    vol.commit()
 
 
 def download_workflow_assets(profile_selection):

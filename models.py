@@ -102,11 +102,6 @@ MODEL_PROFILES = {
         'filename': 'loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors',
         'model_dir': 'loras/h3',
     },
-    {
-        'repo_id': 'Kijai/MiniMax-H3_comfy',
-        'filename': 'loras/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors',
-        'model_dir': 'loras/h3',
-    },
     ],
     'ltx25': [
     {
