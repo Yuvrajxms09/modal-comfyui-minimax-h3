@@ -391,8 +391,9 @@ def get_secrets() -> list[modal.Secret]:
     return secrets
 
 
-# Model profiles are imported by build functions, so include the registry before those run.
+# Build functions import both registries, so include them before those run.
 image = image.add_local_python_source("models", copy=True)
+image = image.add_local_python_source("plugins", copy=True)
 
 # prepare directories
 image = image.run_function(prepare_directories, volumes={"/cache": vol})
@@ -417,7 +418,6 @@ if workflow_file_path.exists():
 else:
     print(f"No local {workflow_file_path.name}; skipping workflow dependency scanning.")
 
-image = image.add_local_python_source("plugins", copy=True)
 from plugins import get_plugins
 comfy_plugins, comfy_plugins_ext = get_plugins(COMFY_PROFILES)
 
