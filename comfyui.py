@@ -12,12 +12,14 @@ import modal
 GPU_MODEL = os.getenv("MODAL_GPU", "L4")
 GPU_NAME = GPU_MODEL.split(':')[0]
 GPU_COUNT = int(GPU_MODEL.split(":")[1]) if ":" in GPU_MODEL else 1
-USE_AUTH = os.getenv("MODAL_USE_AUTH", "False").lower() in ("true", "1", "yes", "on") # App endpoint can only be accessed with Proxy token
+USE_AUTH = os.getenv("MODAL_USE_AUTH", "True").lower() in ("true", "1", "yes", "on") # App endpoint can only be accessed with Proxy token
 MAXTIME = int(os.getenv("MODAL_MAXTIME", "3600")) # stream & websocket max lifetime before forcefully terminated, will also affects startup time when lower than MAXSTARTTIME.
 IDLETIME = int(os.getenv("MODAL_IDLETIME", "60")) # spin down on idle timeout
 WAITTIME = int(os.getenv("MODAL_WAITTIME", "20")) # wait time to finished progressbar animation when inference is done (ie. VHS save video node)
 MAXSTARTTIME = int(os.getenv("MODAL_MAXSTARTTIME", "300")) # ComfyUI & it's custom nodes initialization/startup timeout
-COMFY_VER = os.getenv("COMFY_VER") # ComfyUI version to install (default won't pinned to a specific version, which use the latest commit)
+COMFY_VER = os.getenv("COMFY_VER") or "latest" # ComfyUI version to install
+from models import resolve_profiles
+COMFY_PROFILES = resolve_profiles(os.getenv("COMFY_PROFILES", "h3"))
 COMFYGPU_ARGS = os.getenv("COMFYGPU_ARGS", "") # additional ComfyUI arguments on GPU instance
 COMFYMIX_ARGS = os.getenv("COMFYMIX_ARGS", "") # additional ComfyUI arguments for ComfyMix instance
 JOBS_CUTOFFTIME = int(os.getenv("JOBS_CUTOFFTIME", "86400")) # completed jobs history cutoff (ie. only shows jobs from the last 24 hours)
@@ -39,12 +41,12 @@ def update_vars_from_env():
     GPU_MODEL = os.getenv("MODAL_GPU", "L4")
     GPU_NAME = GPU_MODEL.split(':')[0]
     GPU_COUNT = int(GPU_MODEL.split(":")[1]) if ":" in GPU_MODEL else 1
-    USE_AUTH = os.getenv("MODAL_USE_AUTH", "False").lower() in ("true", "1", "yes", "on")
+    USE_AUTH = os.getenv("MODAL_USE_AUTH", "True").lower() in ("true", "1", "yes", "on")
     MAXTIME = int(os.getenv("MODAL_MAXTIME", "3600"))
     IDLETIME = int(os.getenv("MODAL_IDLETIME", "60"))
     WAITTIME = int(os.getenv("MODAL_WAITTIME", "20"))
     MAXSTARTTIME = int(os.getenv("MODAL_MAXSTARTTIME", "300"))
-    COMFY_VER = os.getenv("COMFY_VER")
+    COMFY_VER = os.getenv("COMFY_VER") or "latest"
     COMFYGPU_ARGS = os.getenv("COMFYGPU_ARGS", "")
     COMFYMIX_ARGS = os.getenv("COMFYMIX_ARGS", "")
     JOBS_CUTOFFTIME = int(os.getenv("JOBS_CUTOFFTIME", "86400"))
@@ -62,7 +64,10 @@ COMFYUI_ROOT = Path("/root/comfy/ComfyUI")
 COMFY_MODELS_ROOT = Path(COMFYUI_ROOT / "models")
 
 # create persistent storage
-vol = modal.Volume.from_name("hf-hub-cache", create_if_missing=True, version=2)
+# Keep profile caches separate so an LTX-only deployment does not inherit the H3 cache.
+DEFAULT_VOLUME_NAME = "hf-hub-cache" if COMFY_PROFILES == ("h3",) else "hf-hub-cache-" + "-".join(COMFY_PROFILES)
+VOLUME_NAME = os.getenv("MODAL_VOLUME_NAME", DEFAULT_VOLUME_NAME)
+vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True, version=2)
 
 # construct images and install deps/custom nodes
 VERSION = f"--version {COMFY_VER}" if COMFY_VER else ""
@@ -252,32 +257,93 @@ def prepare_directories():
     #subprocess.run(['rsync', '-a', '/root/comfy/ComfyUI/', '/cache/ComfyUI/'], volumes={"/cache": vol})
 
 
-def download_all():
-    from models import models, models_ext
-    
+def download_all(profile_selection):
+    from models import get_model_config
+
+    models, models_ext = get_model_config(profile_selection)
     for model in models:
         hf_download(model["repo_id"], model["filename"], model["model_dir"])
 
     for model in models_ext:
         download_external_model(model["url"], model["filename"], model["model_dir"])
 
-    # copy models to base_dir (skip existing files)
-    import shutil
-    def copy_if_not_exists(src, dst):
-        dst_path = Path(dst)
-        if dst_path.is_symlink():
-            dst_path.unlink() 
-        if not os.path.exists(dst):
-            src_path = Path(src)
-            if src_path.is_symlink():
-                # Replicate the symlink itself
-                link_to = os.readlink(src_path)
-                os.symlink(link_to, dst_path)
-            else:
-                shutil.copy2(src, dst, follow_symlinks=False)
-    
-    #print("Copying models structure...")
-    #shutil.copytree(COMFYUI_ROOT / "models", base_dir / "models", copy_function=copy_if_not_exists, symlinks=False, ignore_dangling_symlinks=True, dirs_exist_ok=True)
+    download_workflow_assets(profile_selection)
+
+
+def download_workflow_assets(profile_selection):
+    """Download public H3 guides and optional local-only private workflow assets."""
+    from models import resolve_profiles
+    if "h3" not in resolve_profiles(profile_selection):
+        return
+
+    import hashlib
+    import json
+    from huggingface_hub import hf_hub_download
+    token = os.environ.get("HF_TOKEN")
+    assets_dir = Path("/cache/ComfyUI/assets")
+    prompt_guides_dir = assets_dir / "prompt_guides"
+
+    def download_file(repo_id, filename, destination, expected_bytes=None, expected_sha256=None):
+        cached_path = Path(hf_hub_download(repo_id=repo_id, filename=filename, repo_type="model", revision="main", cache_dir="/cache", token=token))
+        if expected_bytes is not None and cached_path.stat().st_size != expected_bytes:
+            raise RuntimeError(f"Size mismatch for {filename}: expected {expected_bytes}, got {cached_path.stat().st_size}")
+        if expected_sha256:
+            digest = hashlib.sha256()
+            with cached_path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise RuntimeError(f"SHA-256 mismatch for {filename}")
+        if destination.suffix == ".json":
+            try:
+                parsed = json.loads(cached_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise RuntimeError(f"Downloaded JSON is invalid: {filename}") from exc
+            if not isinstance(parsed, dict) or not parsed:
+                raise RuntimeError(f"Downloaded JSON is not a nonempty object: {filename}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() or destination.is_symlink():
+            destination.unlink()
+        destination.symlink_to(cached_path)
+        print(f"Cached workflow asset {repo_id}/{filename} at {destination}")
+        return cached_path
+
+    for filename in ("VIDEO_PROMPT_WRITING_GUIDE_base_en.md", "VIDEO_PROMPT_WRITING_GUIDE_ref_en.md"):
+        download_file("MiniMaxAI/MiniMax-H3", f"docs/{filename}", prompt_guides_dir / filename)
+
+    try:
+        from private_assets import PRIVATE_WORKFLOW_ASSETS, PRIVATE_PROMPT_PACK
+    except ImportError:
+        print("No private_assets.py found; skipping optional personal H3 workflows and prompt packs.")
+        return
+
+    for filename, relative_destination in PRIVATE_WORKFLOW_ASSETS["files"].items():
+        download_file(PRIVATE_WORKFLOW_ASSETS["repo_id"], filename, Path("/cache/ComfyUI") / relative_destination)
+
+    prompt_pack = PRIVATE_PROMPT_PACK
+    manifest_file = "gemini_r2v_prompt_pack/manifest.json"
+    manifest_path = download_file(prompt_pack["repo_id"], manifest_file, Path("/cache/ComfyUI") / prompt_pack["files"][manifest_file])
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError("Gemini prompt-pack manifest is invalid JSON") from exc
+    entries = manifest.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("Gemini prompt-pack manifest has no file entries")
+    for entry in entries:
+        filename = entry.get("filename")
+        expected_bytes = entry.get("bytes")
+        expected_sha256 = entry.get("sha256")
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise RuntimeError(f"Unsafe or invalid prompt-pack filename: {filename!r}")
+        if not isinstance(expected_bytes, int) or not isinstance(expected_sha256, str):
+            raise RuntimeError(f"Incomplete manifest metadata for {filename}")
+        relative_destination = prompt_pack["files"].get(f"gemini_r2v_prompt_pack/{filename}", f"assets/gemini_r2v_prompt_pack/{filename}")
+        download_file(prompt_pack["repo_id"], f"gemini_r2v_prompt_pack/{filename}", Path("/cache/ComfyUI") / relative_destination, expected_bytes=expected_bytes, expected_sha256=expected_sha256)
+
+    for filename in ("t2v_v2_prod.json", "r2v_v2_prod.json"):
+        if filename in prompt_pack["files"]:
+            download_file(prompt_pack["repo_id"], filename, Path("/cache/ComfyUI") / prompt_pack["files"][filename])
 
 
 def get_secrets() -> list[modal.Secret]:
@@ -344,20 +410,11 @@ if workflow_file_path.exists():
         workflow_file_path, "/root/workflow_api.json", copy=True
     ).run_commands("comfy node install-deps --workflow=/root/workflow_api.json", volumes={"/cache": vol})
 else:
-    print(
-        f"Warning: {workflow_file_path} not found. API endpoint might not work without a workflow."
-    )
+    print(f"No local {workflow_file_path.name}; skipping workflow dependency scanning.")
 
 image = image.add_local_python_source("plugins", copy=True)
-try:
-    from plugins import comfy_plugins
-except ImportError:
-    comfy_plugins = []
-    
-try:
-    from plugins import comfy_plugins_ext
-except ImportError:
-    comfy_plugins_ext = []
+from plugins import get_plugins
+comfy_plugins, comfy_plugins_ext = get_plugins(COMFY_PROFILES)
 
 if comfy_plugins:
     image = image.run_commands("comfy node install " + " ".join(comfy_plugins), volumes={"/cache": vol}) #, gpu=GPU_MODEL
@@ -365,45 +422,83 @@ if comfy_plugins:
 def install_ext_plugin(image: modal.Image, plugin: dict) -> modal.Image:
     """Install one external custom node from git into ComfyUI's custom_nodes.
 
-    Supports optional ``branch``, ``requirements`` (a list of requirement
-    files), an ``install`` script (.py), and ``ext_deps`` (a list of extra pip
-    packages). User-supplied values are shell-quoted before use.
+    Supports optional ``branch``, ``commit``, ``folder``, ``source_subdir``,
+    ``requirements`` (a list of requirement files), an ``install`` script
+    (.py), and ``ext_deps`` (a list of extra pip packages).
     """
-    # TODO: Do these with mounted volume (ie. within image.run_function) so we can install plugins on volume, but venv might also need to be in volume.
     nodes_dir = str(COMFYUI_ROOT / "custom_nodes")
-    Path(nodes_dir).mkdir(parents=True, exist_ok=True)
     url = plugin["url"]
-    name = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
-    work_dir = f"{nodes_dir}/{shlex.quote(name)}"
-
+    repo_name = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    name = plugin.get("folder", repo_name)
+    if Path(name).name != name or name in (".", ".."):
+        raise ValueError(f"Invalid custom-node folder name: {name!r}")
+    work_dir = f"{nodes_dir}/{name}"
+    quoted_nodes_dir = shlex.quote(nodes_dir)
+    quoted_work_dir = shlex.quote(work_dir)
+    quoted_url = shlex.quote(url)
     branch = plugin.get("branch", "").strip()
     branch_opt = f"--branch {shlex.quote(branch)} " if branch else ""
-    image = image.run_commands(
-        f"cd {nodes_dir} && git clone --recurse-submodules --single-branch "
-        f"{branch_opt}{shlex.quote(url)}"
-    )
+    commit = plugin.get("commit", "").strip()
+    source_subdir = plugin.get("source_subdir", "").strip("/")
+    if source_subdir and (Path(source_subdir).is_absolute() or ".." in Path(source_subdir).parts):
+        raise ValueError(f"Invalid custom-node source_subdir: {source_subdir!r}")
+
+    if source_subdir:
+        staging_dir = f"/tmp/{name}-source"
+        clone_cmd = (
+            f"mkdir -p {quoted_nodes_dir} && "
+            f"git clone --recurse-submodules --single-branch {branch_opt}"
+            f"{quoted_url} {shlex.quote(staging_dir)}"
+        )
+        image = image.run_commands(clone_cmd)
+        if commit:
+            image = image.run_commands(
+                f"cd {shlex.quote(staging_dir)} && "
+                f"git fetch --depth=1 origin {shlex.quote(commit)} && "
+                f"git checkout --detach {shlex.quote(commit)}"
+            )
+        image = image.run_commands(
+            f"test -d {shlex.quote(f'{staging_dir}/{source_subdir}')} && "
+            f"cp -a {shlex.quote(f'{staging_dir}/{source_subdir}')} {quoted_work_dir} && "
+            f"rm -rf {shlex.quote(staging_dir)}"
+        )
+    else:
+        image = image.run_commands(
+            f"mkdir -p {quoted_nodes_dir} && "
+            f"git clone --recurse-submodules --single-branch {branch_opt}"
+            f"{quoted_url} {quoted_work_dir}"
+        )
+        if commit:
+            image = image.run_commands(
+                f"cd {quoted_work_dir} && "
+                f"git fetch --depth=1 origin {shlex.quote(commit)} && "
+                f"git checkout --detach {shlex.quote(commit)}"
+            )
 
     requirements = plugin.get("requirements") or []
     if requirements:
-        files = " ".join(f"-r {shlex.quote(f)}" for f in requirements)
-        # --no-deps so a node's requirements can't pull a CPU-only torch over
-        # the CUDA build; use "ext_deps" below to add back what's needed.
-        image = image.run_commands(
-            f"cd {work_dir} && uv pip install --no-deps "
-            f"--python $(command -v python) --compile-bytecode {files}"
+        install_requirements = " ".join(
+            f"if [ -f {filename} ]; then "
+            f"uv pip install --no-deps --python $(command -v python) "
+            f"--compile-bytecode -r {filename}; "
+            "fi;"
+            for filename in (shlex.quote(f) for f in requirements)
         )
+        # --no-deps keeps a node's requirements from replacing the CUDA build;
+        # use "ext_deps" to install selected packages with their dependencies.
+        image = image.run_commands(f"cd {quoted_work_dir} && {install_requirements}")
 
     # Note: Installer script might not be able to detect CUDA availability when running in CPU-only container.
     install = plugin.get("install", "").strip()
     if install:
         if install.endswith(".py"):
-            image = image.run_commands(f"cd {work_dir} && python {shlex.quote(install)}") # uv run --no-project --python $(command -v python) #, gpu=GPU_MODEL 
+            image = image.run_commands(f"cd {quoted_work_dir} && python {shlex.quote(install)}")
         else:
             print(f"Unsupported installation script: {install}")
 
     ext_deps = plugin.get("ext_deps") or []
     if ext_deps:
-        image = image.uv_pip_install(ext_deps, extra_options="--no-deps") #, gpu=GPU_MODEL
+        image = image.uv_pip_install(ext_deps) #, gpu=GPU_MODEL
 
     return image
 
@@ -453,13 +548,17 @@ image = (
     .uv_pip_install(["torch~=2.10.0", "torchvision~=0.25.0", "torchaudio~=2.10.0"], extra_options="--extra-index-url https://download.pytorch.org/whl/cu130") # Fix torch version after changed by FA4 / ultralytics
 )
 
-# download models
+private_assets_path = root_dir / "private_assets.py"
+if private_assets_path.is_file():
+    image = image.add_local_python_source("private_assets", copy=True)
+
+# Download only the models/assets selected for this deployment.
 image = (
     image.env(
-        {"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_XET_HIGH_PERFORMANCE": "1"}
+        {"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_XET_HIGH_PERFORMANCE": "1", "COMFY_PROFILES": ",".join(COMFY_PROFILES)}
     )
     .add_local_python_source("models", copy=True)
-    .run_function(download_all, volumes={"/cache": vol}, secrets=get_secrets())
+    .run_function(download_all, ",".join(COMFY_PROFILES), volumes={"/cache": vol}, secrets=get_secrets())
 )
 
 # Disable ultralytics' Anonymized Google Analytics

@@ -17,8 +17,8 @@ Good for testing Wan2.2/LTX-2.5/MiniMax-H3 or other image/video/audio generation
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/anr2me/modal-comfyui.git
-   cd modal-comfyui
+   git clone https://github.com/Yuvrajxms09/modal-comfyui-minimax-h3.git
+   cd modal-comfyui-minimax-h3
    ```
 2. Install the Modal client:
    ```bash
@@ -47,33 +47,35 @@ Good for testing Wan2.2/LTX-2.5/MiniMax-H3 or other image/video/audio generation
 
 ## Configuration
 
-### Models
+### Model profiles
 
-Copy `models.example.py` to `models.py` and edit it to manage your models. You can specify:
-- Hugging Face models(`models`) using `repo_id` and `filename`. Set your `HF_TOKEN` in `huggingface-secret` Secrets for a faster download speed and gated models.
-- External models(`models_ext`, e.g. civitai) using a direct `url`. You can also set your `CIVITAI_TOKEN` in `custom-secret` Secrets to download gated models.
+`COMFY_PROFILES` selects the models, custom nodes, and optional workflow assets for a deployment. ComfyUI defaults to the latest release (`COMFY_VER=latest`). The default profile remains `h3` for existing deployments.
 
-Models are downloaded to persistent volumes and symlinked to the specified `model_dir`.
+```bash
+# MiniMax H3
+modal deploy comfyui.py
 
-`model_dir` accepts two styles:
-- **Relative path** (recommended for standard ComfyUI folders): resolved under `/root/comfy/ComfyUI/models/`. e.g. `"checkpoints"` → `/root/comfy/ComfyUI/models/checkpoints`.
-- **Absolute path**: used as-is. Use this when the target lives outside `ComfyUI/models/` (e.g. a custom node's own model directory).
+# LTX-2.5 only: no H3 weights, custom nodes, or private H3 workflow downloads
+COMFY_PROFILES=ltx25 modal deploy comfyui.py
 
-See `models.example.py` for reference.
+# LTX-2.5 with the optional Gemma prompt-enhancer encoder
+COMFY_PROFILES=ltx25_prompt_enhancer modal deploy comfyui.py
 
-### Plugins and Custom Nodes
+# Combine profiles when one ComfyUI deployment needs both
+COMFY_PROFILES=h3,ltx25 modal deploy comfyui.py
+```
 
-Copy `plugins.example.py` to `plugins.py` and edit it to add custom node IDs or titles to be installed via `comfy-cli`.
-- **Workflow Dependencies**: If you have a `workflow_api.json` in the root directory, the setup will automatically install the necessary custom nodes for that workflow.
+LTX-2.5 uses ComfyUI's built-in nodes and downloads the official ComfyUI INT8 ConvRot transformer and text encoder, BF16 video/audio VAEs, and BF16 2x latent upscaler. The prompt-enhancer encoder is optional. H3 weights and its workflow-specific LoRAs are defined separately in `MODEL_PROFILES` in `models.py`.
 
-### In case of Insufficient Custom Node
+Each profile gets its own persistent Modal volume by default (`hf-hub-cache` for H3, and a profile-derived volume for other selections), avoiding reuse of another profile's model cache. Set `MODAL_VOLUME_NAME` to override this behavior. `HF_TOKEN` can be supplied through the Modal `huggingface-secret` for faster or gated Hugging Face downloads.
 
-Open ComfyUI manager on comfyui and click "Used in Workflow" to see which custom nodes are used in the workflow.  
-_**Note:** You can enable Legacy ComfyUI Manager by using `--enable-manager-legacy-ui` argument._
+To add a model family, add a named entry to `MODEL_PROFILES` in `models.py` and its external downloads in `EXTERNAL_MODEL_PROFILES` if needed. Add required custom nodes to the matching profile in `PLUGIN_PROFILES` in `plugins.py`. Leave the profile's node list empty when the required nodes are built into ComfyUI. Multi-profile deployments merge model and node definitions.
 
-- Add these custom nodes to `comfy_plugins` in `plugins.py`(be careful of node id). You can find the node id at https://registry.comfy.org/
-- You can also install custom nodes repository using `git` url. Add the url, branch, and their dependencies to `comfy_plugins_ext` in `plugins.py` (be careful of dependency conflicts).  
-_**Note:** We are installing `requirements.txt` with`--no-deps` option (similar to what ComfyUI-Manager did), so there might be some missing packages that need to be added to `ext_deps`. Check the log console for missing modules._ 
+The optional `private_assets.py` file supports local-only workflow and prompt-pack downloads. It is gitignored so private repository names and workflow configuration are not published. Without it, public H3 model downloads still work and personal workflows are skipped.
+
+### Models and custom nodes
+
+Hugging Face entries use `repo_id`, `filename`, and `model_dir`; direct downloads use `url`, `filename`, and `model_dir`. Relative model paths are resolved under `ComfyUI/models`; absolute paths can target node-specific folders. Profile-specific nodes support optional `branch`, `commit`, `folder`, `source_subdir`, `requirements`, and `ext_deps` fields. A root-level `workflow_api.json` can also install its required nodes during the image build.
 
 ## Usage
 
@@ -107,7 +109,9 @@ You can find the GPU types available on modal.com at https://modal.com/docs/guid
 
 Other Environment Variables you can use are:
 ```bash
+COMFY_PROFILES="h3" # comma-separated: h3, ltx25, ltx25_prompt_enhancer
 COMFY_VER="latest" # or "nightly --commit <hash>" or "nightly --pr kijai:minimax_fun"
+MODAL_VOLUME_NAME="" # optional override for the profile-specific cache volume
 COMFYGPU_ARGS="--use-flash-attention --preview-method auto --front-end-version Comfy-Org/ComfyUI_frontend@1.45.21"
 COMFYMIX_ARGS="--preview-method auto --front-end-version Comfy-Org/ComfyUI_frontend@1.45.21 --enable-manager-legacy-ui"
 JOBS_CUTOFFTIME=172800
@@ -118,7 +122,7 @@ MODAL_MAXSTARTTIME=300
 MODAL_USE_AUTH=True
 ```
 You can access ComfyUI from the provided persistent URL when successfully deployed.  
-You will need to create a Modal's Proxy Token (from Settings) when using `MODAL_USE_AUTH`.
+Authentication is enabled by default. Create a Modal Proxy Token in Settings and provide it when accessing the app. Set `MODAL_USE_AUTH=False` only if you intentionally want a public endpoint.
 
 ## Features
 
