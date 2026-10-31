@@ -257,8 +257,10 @@ def prepare_directories():
     #subprocess.run(['rsync', '-a', '/root/comfy/ComfyUI/', '/cache/ComfyUI/'], volumes={"/cache": vol})
 
 
-def download_all(profile_selection):
+def download_all(profile_selection=None):
     from models import get_model_config
+
+    profile_selection = profile_selection or os.environ.get("COMFY_PROFILES", "h3")
 
     models, models_ext = get_model_config(profile_selection)
     for model in models:
@@ -558,7 +560,7 @@ image = (
         {"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_XET_HIGH_PERFORMANCE": "1", "COMFY_PROFILES": ",".join(COMFY_PROFILES)}
     )
     .add_local_python_source("models", copy=True)
-    .run_function(download_all, ",".join(COMFY_PROFILES), volumes={"/cache": vol}, secrets=get_secrets())
+    .run_function(download_all, volumes={"/cache": vol}, secrets=get_secrets())
 )
 
 # Disable ultralytics' Anonymized Google Analytics
