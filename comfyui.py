@@ -67,7 +67,7 @@ COMFY_MODELS_ROOT = Path(COMFYUI_ROOT / "models")
 # Keep profile caches separate so an LTX-only deployment does not inherit the H3 cache.
 DEFAULT_VOLUME_NAME = "hf-hub-cache" if COMFY_PROFILES == ("h3",) else "hf-hub-cache-" + "-".join(COMFY_PROFILES)
 VOLUME_NAME = os.getenv("MODAL_VOLUME_NAME", DEFAULT_VOLUME_NAME)
-vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True, version=2)
+vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 
 # construct images and install deps/custom nodes
 VERSION = f"--version {COMFY_VER}" if COMFY_VER else ""
