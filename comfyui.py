@@ -391,6 +391,9 @@ def get_secrets() -> list[modal.Secret]:
     return secrets
 
 
+# Model profiles are imported by build functions, so include the registry before those run.
+image = image.add_local_python_source("models", copy=True)
+
 # prepare directories
 image = image.run_function(prepare_directories, volumes={"/cache": vol})
 
@@ -559,7 +562,6 @@ image = (
     image.env(
         {"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_XET_HIGH_PERFORMANCE": "1", "COMFY_PROFILES": ",".join(COMFY_PROFILES)}
     )
-    .add_local_python_source("models", copy=True)
     .run_function(download_all, volumes={"/cache": vol}, secrets=get_secrets())
 )
 
